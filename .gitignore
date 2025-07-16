@@ -33,4 +33,5 @@ ehthumbs.db
 Thumbs.db
 
 # Build output
-ask 
+ask
+ask-* 
