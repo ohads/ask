@@ -33,9 +33,10 @@ type ChatResponse struct {
 
 func main() {
 	var (
-		setupFlag = flag.Bool("setup", false, "Run the interactive setup process")
-		modelFlag = flag.String("model", "", "Override the configured model for this request")
-		helpFlag  = flag.Bool("help", false, "Show help information")
+		setupFlag      = flag.Bool("setup", false, "Run the interactive setup process")
+		modelFlag      = flag.String("model", "", "Override the configured model for this request")
+		helpFlag       = flag.Bool("help", false, "Show help information")
+		showConfigFlag = flag.Bool("show-config", false, "Show the current configuration and exit")
 	)
 	flag.Parse()
 
@@ -51,6 +52,24 @@ func main() {
 		return
 	}
 
+	if *showConfigFlag {
+		cfg, err := config.Load()
+		if err != nil {
+			log.Fatalf("Failed to load configuration: %v", err)
+		}
+		fmt.Println("Current Ask CLI configuration:")
+		fmt.Printf("  Config file: %s\n", config.GetConfigPath())
+		fmt.Printf("  API Key: %s\n", maskAPIKey(cfg.APIKey))
+		fmt.Printf("  Model: %s\n", cfg.Model)
+		return
+	}
+
+	// Autocomplete support
+	if len(os.Args) > 1 && os.Args[1] == "completion" {
+		printCompletionScript()
+		return
+	}
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -59,10 +78,16 @@ func main() {
 
 	// Check if API key is configured
 	if cfg.APIKey == "" {
-		fmt.Println("❌ No API key configured.")
-		fmt.Println("Please run the setup process:")
-		fmt.Println("  ask --setup")
-		os.Exit(1)
+		fmt.Println("🤖 No configuration found. Starting setup process...")
+		fmt.Println()
+		if err := setup.Run(); err != nil {
+			log.Fatalf("Setup failed: %v", err)
+		}
+		// Reload configuration after setup
+		cfg, err = config.Load()
+		if err != nil {
+			log.Fatalf("Failed to load configuration after setup: %v", err)
+		}
 	}
 
 	// Get prompt from command line arguments
@@ -144,4 +169,39 @@ func showHelp() {
 	fmt.Println("Configuration:")
 	fmt.Printf("  Config file: %s\n", config.GetConfigPath())
 	fmt.Println("  Run 'ask --setup' to configure your API key and preferred model")
+}
+
+func maskAPIKey(key string) string {
+	if len(key) <= 8 {
+		return "********"
+	}
+	return key[:4] + strings.Repeat("*", len(key)-8) + key[len(key)-4:]
+}
+
+func printCompletionScript() {
+	models := config.GetAvailableModels()
+	modelList := strings.Join(models, " ")
+	fmt.Println(`# bash/zsh completion for ask
+_ask_completions() {
+    local cur prev opts models
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    opts="--setup --model --help --show-config completion"
+    models="` + modelList + `"
+
+    if [[ $prev == --model ]]; then
+        COMPREPLY=( $(compgen -W "$models" -- $cur) )
+        return 0
+    fi
+
+    if [[ $cur == -* ]]; then
+        COMPREPLY=( $(compgen -W "$opts" -- $cur) )
+        return 0
+    fi
+}
+
+complete -F _ask_completions ask
+# To enable: source <(ask completion)
+`)
 }
